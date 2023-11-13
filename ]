@@ -1,0 +1,200 @@
+#include "deSAW.cpp"
+
+
+class Backward_Extension : public Extension {
+	
+	public:
+		
+		void internal_reroute( std:: shared_ptr< Path > backward_modification ){
+			
+
+			// If the modification traverses the first veretx ( the origin )
+			// we remove verticies occuring before the origin, including the origin.
+			// from the backward modification. 
+			if( backward_modifcation->contains( Vertex(0,0) ) ){
+
+
+				Node_Itr itr( backward_modification->start );
+				while( itr.current != nullptr ){
+					if( itr.current->v != Vertex(0,0) ){
+						auto to_be_removed = itr.current;
+						itr.advance();
+						backward_modification->remove( to_be_removed );
+					}
+					else{
+						// removing the origin.
+						backward_modification->remove( itr.current->v );
+						break;
+					}
+				}
+
+
+				// We remove verticies in the extension before and including the
+				// last vertex of backward modification. 
+				Node_Itr itr_1( this->start() );
+				while( itr_1.current->v != backward_modification->end->v ){
+					Vertex to_be_removed = itr_1.current->v;
+					itr_1.advance();
+					this->remove( to_be_removed );
+
+				}
+				// removing the last vertex of the backward modification in the 
+				// backward extension.
+				this->remove( itr_1.current->v )
+				
+				// concatinating the backward modification to the front of the backward extension.  
+				*backward_modification + *this;
+
+					
+			}
+			else{
+
+				// We delete the section in the backward extension which lies between the first and last vertex of 
+				// the backward_modification, excluding said first and last vertex.
+				Node_Itr itr( this->dict[ backward_modification->start->v ]->next );
+				while( itr.current->v != backward_modification->end->v ){
+					Vertex to_be_removed = itr.current->v;
+					itr.advance();
+					this->remove( to_be_removed );
+				}
+				// We insert the backward modification into the backward extension. 
+				Node_Itr itr_1( backward_modification->start->next );
+
+				while( itr_1.current->v != backward_modification->end->v){
+					this->insert( itr_1.current->v, backward_modification->end()->v, this->dict[ backward_modification->end() ]->prev->v ); 
+					itr_1.advance();
+				}
+
+			}
+
+
+				
+		}
+};
+
+
+class deSAW : public eSAW {
+	protected:
+
+		std:: unique_ptr< Extension > backward_extension; 
+		
+	public:
+		
+		deSAW(){
+			std:: unique_ptr< Extension > backward_extension = std:: unique_ptr< Extension > ( new Extension() );
+		}
+	
+		void extend( std:: mt19937& g ){
+
+                        // We examin the neighbors of the the current end of the walk and evaluate whether
+                        // they are e-valid.
+                        auto neighbors = random_neighbors( walk->end()->v , g );
+                        for( auto n : neighbors ){
+                                //std:: cout<< "candidate: "<< n << std:: endl;
+                                // If a neighbor is occupied by the walk we reject it.
+                                if( walk->contains( n ) )
+                                        continue;
+                                std:: vector< Vertex > disjoint_neighborhood;
+                                for( auto a : all_neighbors( walk->end()->v ) ){
+                                        if( not walk->contains( a ) )
+                                                disjoint_neighborhood.push_back( a );
+                                }
+
+                                // We attempt to find a path between the candiate n and the first vertex of the extension.
+                                std:: shared_ptr< Path > forward_modification = find_path( n , this-forward_extension->start()->v, disjoint_neighborhood );
+				// If no path is found the neighbor n is not e-valid and we continue to the next neighbor of the endpoint.
+				if( not forward_modification)
+					continue;
+
+				// We now need to check whether the forward modification will interfere with the current
+				// backward extension.
+				intersec =  backward_extension->intersection( *forward_modification );
+				if( intersec ){
+					
+					sensitive_region = this->construct_sensitive_region( *forward_modification, *intersec );
+					
+					// We construct the disjoint neighborhood of the sensitive region in which we attempt to find
+					// a backward modification, by which to reroute the backward extension so as to resolve the intersection.
+					std:: shared_ptr< Path > disjoint_neighborhood_of_sesitive_region = std:: shared_ptr<Path>(new Path());
+					Node_Itr itr( sensitive_region->start );
+				        while( itr.current != nullptr ){
+						for( auto v : all_neighbors( itr.current->v ) ){
+							if( (not sensitive_region->contains( v )) and ( (not walk->contains( v )) or walk->start()->v != v) )
+								disjoint_neighborhood_of_sensitive_region.append( v );		
+
+						}
+
+					}
+
+					Vertex first_vertex_of_backward_modification;
+                                        Vertex last_vertex_of_backward_modification;
+				       	Node_Itr itr_1( sensitive_region->start );
+					// We find the last vertex of the backward extension just before entering the sensitive region for the first time.
+					//
+					if( sensitive_region->start->v != backward_extension->start()->v )
+						first_vertex_of_backward_modification = this->backward_extension->prev_vertex( sensitive_region->start->v );
+					else 
+						first_veretx_of_backward_modifcation = this->walk->start()->v;
+					
+					last_vertex_of_backward_modification = this->backward_extension->next_veretx( sensitive_region->end->v ); 
+
+						
+
+					
+
+					auto backward_modification = find_path( first_vertex_of_backward_modification,
+						       				last_vertex_of_backward_modification, 
+										disjoint_neighborhood_of_sensitive_region ); 
+					// If no backward modifcation path could be found then the neighbor n is not de-valid and we move on to the 
+					// next neighbor of the endpoint. 
+					if( not backward_modification )
+						continue;
+					// Now we must reroute the backward extension with the backward modification. 
+					
+					this->backward_extension->internal_reroute( backward_modification ); 
+					
+				}
+				
+
+
+                                // If the path could be found the neighbor n is accepted and the extension
+                                // modified so as to be an extension of this new end vertex.
+                                if( forward_modification ){
+                                        //std::cout<< " forward modification: "<< *forward_modification ;
+                                        rectangle.adjust( n );
+                                        *walk + n;
+
+                                        // When the forward modifcation exceeds the rectangle, we construct a
+                                        // completely new extension from the forward modification, to replace the old one.
+                                        if(  forward_modification->exceeds( rectangle) ){
+                                                this->construct_new_extension( forward_modification );
+                                                // We remove the first vertex of the extension as it coincides
+                                                // with the new end of the walk.
+                                                this->forward_extension->remove( this->forward_extension->start()->v );
+                                        }
+                                        // When the forward modifcation does not exceed the the rectangle,
+                                        // we attach the forward modification the existing extension.
+                                        else{
+                                                // We ensure no loops are created when attaching the forward modification to
+                                                // the beginning of the extension, by appropriate deletions on both objects.
+                                                this->forward_extension->loop_erase_for_front_concat( *forward_modification );
+						forward_modification->remove( forward_modification->start );
+                                                // Attaching forward modification to the beginning of the extension.
+                                                *forward_modification + *forward_extension;
+                                        }
+
+                                        // We adjust the rectangle, and straighten extension as needed.
+                                        /*
+                                        std::cout<< "hi" << std:: endl;
+                                        std:: cout<< *walk<< std::endl <<*extension;
+                                        */
+                                        this->adjust( n );
+                                        break;
+
+                                }
+                        }
+                }
+
+
+
+};
